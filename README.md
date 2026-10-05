@@ -6,28 +6,41 @@ Data is organized as firm → organizations (clients) → records: documents, ri
 actions, audits, management reviews, training, suppliers, equipment and more. The model has
 150 tables in 15 domains.
 
-## Layout
+**Stack:** Next.js 15 (App Router, TypeScript) for the web app and the API, and PostgreSQL 16.
+It runs for free on Vercel (Hobby) with Neon Postgres (free tier).
 
-| Path | What |
-|---|---|
-| `db/model.py` | **Single source of truth** for the data model (tables, enums, RLS classes). |
-| `db/gen.py` | Generates `db/generated/schema.sql` (PostgreSQL 16 DDL + RLS) and `model.json` (metadata for the API and UI). |
-| `db/migrations/` | Ordered SQL migrations. `0001_baseline.sql` is the generated schema; `0002_app_role.sql` sets up the runtime role. |
-| `db/seed/dev.sql` | Demo firm, two clients, five users, sample registers. |
-| `db/init/` | Cluster roles for local Postgres (mounted by docker compose). |
-| `backend/` | FastAPI API (`qms_api`) + pytest suite against a real database. |
-| `frontend/` | React + TypeScript app (Vite), generated from the same metadata. |
+## Deploy to Vercel + Neon (free)
 
-## Run it
+1. Import this repository in Vercel (**Add New → Project**). Keep the defaults.
+2. Under the project's **Storage** tab, add **Neon** (free plan). Vercel then sets
+   `DATABASE_URL` and `DATABASE_URL_UNPOOLED` for you.
+3. Add these environment variables (**Settings → Environment Variables**):
+
+   | Variable | Value |
+   |---|---|
+   | `QMS_JWT_SECRET` | a random string, e.g. `openssl rand -base64 32` |
+   | `QMS_MIGRATE_ON_BUILD` | `true`: each build applies pending migrations |
+   | `QMS_SEED_DEMO` | `true`: loads the demo data into an empty database |
+   | `QMS_DEV_AUTH` | `true`: password-less login with the demo accounts |
+
+4. Redeploy. The `vercel-build` script migrates the database, seeds it, then builds the app.
+
+> `QMS_DEV_AUTH=true` lets anyone with the URL sign in as a demo user. That is fine for a
+> test deployment with demo data, but never for real client data. Real login is the next milestone.
+
+Optionally, set the Vercel function region (**Settings → Functions**) to the Neon database's region for faster queries.
+
+## Run locally
 
 ```bash
-docker compose up -d db          # or any local PostgreSQL 16 after running db/init/00_roles.sql
-make migrate seed
-make api                         # http://localhost:8000/docs
-make web                         # http://localhost:5173
+docker compose up -d db          # or any PostgreSQL 16 after running db/init/00_roles.sql
+cp .env.example .env.local
+npm install
+npm run db:migrate && npm run db:seed
+npm run dev                      # http://localhost:3000
 ```
 
-Sign in with one of the dev accounts listed on the login page:
+Sign in with one of the demo accounts listed on the login page:
 
 | Account | Sees |
 |---|---|
@@ -36,7 +49,22 @@ Sign in with one of the dev accounts listed on the login page:
 | `qse@alpha.test`, `gerant@alpha.test` | Alpha's own users |
 | `qse@beta.test` | Beta's own user |
 
-Tests: `make test`. They create and drop a `qms_test` database, so `qms_owner` needs `CREATEDB`.
+`npm test` runs the test suite against a throwaway `qms_test` database (the connecting role needs
+`CREATEDB`; override the server with `QMS_TEST_ADMIN_URL`). `npm run typecheck` checks the types.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `db/model.py` | **Single source of truth** for the data model (tables, enums, RLS classes). |
+| `db/gen.py` | Generates `db/generated/schema.sql` (DDL + RLS) and `model.json` (metadata for the API and UI). Python, build-time only. |
+| `db/migrations/` | Ordered SQL migrations. `0001_baseline.sql` is the generated schema; `0002_app_role.sql` sets up the runtime role. |
+| `db/seed/dev.sql` | Demo firm, two clients, five users, sample registers. |
+| `lib/server/` | API: `router.ts` (all routes), `crud.ts` (generic CRUD), `db.ts` (per-request transaction), `model.ts`, `auth.ts`, `migrate.ts`. |
+| `app/api/[...path]/route.ts` | Mounts the API as a single serverless function. |
+| `app/`, `components/`, `lib/client/` | The web app, generated from the same metadata. |
+| `tests/` | Vitest suite. It calls the API in-process against a real database. |
+| `scripts/` | `migrate`, `seed`, and `deploy-db` (run by `vercel-build`). |
 
 ## How tenancy is enforced
 
@@ -44,34 +72,29 @@ Isolation lives in the database, not in API code:
 
 * Every client table has `organization_id`. Foreign keys between client tables are composite
   `(organization_id, x_id)`, so a row can never reference another client's record.
-* Every table has RLS policies built on `app.current_user_id()`. The API sets
-  `app.user_id` with `set_config(..., true)` at the start of each request's transaction (`backend/qms_api/db.py`).
-* The API connects as `qms_api`, a member of `qms_app`. That role owns nothing and has no
-  `BYPASSRLS`, so the policies always apply. Only migrations and seeds run as the owner.
+* Every table has RLS policies built on `app.current_user_id()`. Each request runs in one transaction that starts with
+  `SET LOCAL ROLE qms_app` and `set_config('app.user_id', …, true)` (`lib/server/db.ts`). `qms_app` owns nothing
+  and has no `BYPASSRLS`, so the policies apply even though the connection string is the owner's
+  (as on Neon).
 * The client controls the firm's access (`organizations.firm_access`: full / read_only / none).
   A trigger stops the firm from changing it.
-* `backend/tests/test_tenancy.py` checks these guarantees end to end.
+* `tests/tenancy.test.ts` checks these guarantees end to end.
 
 ## API
 
-* `POST /api/auth/dev-login` (only with `QMS_DEV_AUTH=true`) → bearer token. `GET /api/me`, `GET /api/meta`.
-* `GET|POST /api/orgs/{org}/t/{table}` and `GET|PATCH|DELETE /api/orgs/{org}/t/{table}/{id}`
-  for organization data.
+* Session: `POST /api/auth/dev-login {email}` sets an httpOnly cookie and also returns a bearer token for scripts.
+  `POST /api/auth/logout`, `GET /api/me`, `GET /api/meta`.
+* `GET|POST /api/orgs/{org}/t/{table}` and `GET|PATCH|DELETE /api/orgs/{org}/t/{table}/{id}` for organization data.
 * `/api/t/{table}[/{id}]` for the firm library, global reference and platform tables.
 * Lists support `?col=v`, `col__ne|lt|lte|gt|gte=v`, `col__in=a,b`, `col__isnull=true`, `q=`
-  (text search), `order=col|-col`, `limit`, `offset`.
+  (text search), `order=col|-col`, `limit` (≤ 500), `offset`.
 * Link tables (composite key) are deleted with `DELETE …/t/{table}?key1=…&key2=…`.
-* Writes are appended to `activity_log` with a before/after diff.
+* Writes must be `application/json`. Each write is appended to `activity_log` with a before/after diff.
 
 ## Changing the model
 
-1. Edit `db/model.py`, then run `make gen`.
-2. **Before the first production deploy:** copy `db/generated/schema.sql` over
-   `db/migrations/0001_baseline.sql`.
+1. Edit `db/model.py`, then run `npm run db:gen` (needs Python 3).
+2. **Before the first deployment that holds real data:** copy `db/generated/schema.sql` over
+   `db/migrations/0001_baseline.sql`, and reset test databases.
    **After it:** write a new numbered migration. The migrator refuses to run a migration that changed after it was applied.
-3. `test_model_sync.py` fails if the generated files or the baseline drift from the model.
-
-## Configuration (`QMS_*` env vars)
-
-`DATABASE_URL`, `OWNER_DATABASE_URL`, `JWT_SECRET` (the API refuses to start with the default
-secret unless `DEV_AUTH` is on), `JWT_TTL_MINUTES`, `DEV_AUTH`, `CORS_ORIGINS`.
+3. `tests/model-sync.test.ts` fails if the generated files or the baseline drift from the model.

@@ -1,4 +1,4 @@
-# Local PostgreSQL 16 with the qms_owner / qms_app / qms_api roles (see db/init/00_roles.sql).
+# Local PostgreSQL 16 with the qms_owner role and qms database (see db/init/00_roles.sql).
 services:
   db:
     image: postgres:16

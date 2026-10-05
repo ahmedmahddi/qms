@@ -1,14 +1,23 @@
 -- =====================================================================================
 -- Runtime role for the API.
--- The schema owner bypasses RLS (it owns the tables), so the API must never connect as
--- the owner. It connects as a login role that is a member of qms_app: no ownership, no
--- BYPASSRLS, only DML grants. Every policy in 0001 then applies to every query.
+-- The schema owner bypasses RLS (it owns the tables). The app connects with whatever URL the
+-- host provides (on Neon: the owner) and starts every transaction with SET LOCAL ROLE qms_app:
+-- no ownership, no BYPASSRLS, only DML grants, so every policy in 0001 applies to every query.
 -- =====================================================================================
 
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'qms_app') THEN
     CREATE ROLE qms_app NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
+  -- The connecting role must be allowed to SET ROLE qms_app. Since PostgreSQL 16 creating a
+  -- role only grants ADMIN on it (no SET), so ask for SET explicitly; INHERIT stays off.
+  IF current_setting('server_version_num')::int >= 160000 THEN
+    IF NOT pg_has_role(current_user, 'qms_app', 'SET') THEN
+      EXECUTE format('GRANT qms_app TO %I WITH INHERIT FALSE, SET TRUE', current_user);
+    END IF;
+  ELSIF NOT pg_has_role(current_user, 'qms_app', 'MEMBER') THEN
+    EXECUTE format('GRANT qms_app TO %I', current_user);
   END IF;
 END $$;
 
