@@ -1,0 +1,18 @@
+# Local PostgreSQL 16 with the qms_owner / qms_app / qms_api roles (see db/init/00_roles.sql).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 20
+
+volumes:
+  pgdata:
