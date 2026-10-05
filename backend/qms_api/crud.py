@@ -18,6 +18,8 @@ from psycopg import sql
 from .meta import SERVER_COLUMNS, Column, Model, Table
 
 MAX_LIMIT = 500
+# ?col=v (equality), ?col__ne=v, ?col__lt=v … ?col__in=a,b,c, ?col__isnull=true
+FILTER_OPS = {"": "=", "ne": "<>", "lt": "<", "lte": "<=", "gt": ">", "gte": ">="}
 
 
 class BadRequest(Exception):
@@ -91,18 +93,29 @@ def list_rows(conn: psycopg.Connection, model: Model, table: Table, org_id: UUID
               filters: dict[str, str], q: str | None, order: str | None,
               limit: int = 100, offset: int = 0) -> dict[str, Any]:
     where, params = _where_org(table, org_id)
-    for k, v in filters.items():
+    for key, v in filters.items():
+        k, _, op = key.partition("__")
         col = table.columns.get(k)
         if col is None or k not in table.readable_columns():
-            raise BadRequest(f"cannot filter on {k}", k)
-        if v == "null":
-            where.append(sql.SQL("t.{} IS NULL").format(sql.Identifier(k)))
+            raise BadRequest(f"cannot filter on {k}", key)
+        ident = sql.Identifier(k)
+        if op == "isnull" or (op == "" and v == "null"):
+            null = op == "" or _parse_filter(table.columns[k], v, boolean=True)
+            where.append(sql.SQL("t.{} IS NULL" if null else "t.{} IS NOT NULL").format(ident))
         elif col.is_array:
-            where.append(sql.SQL("%s::{} = ANY(t.{})").format(sql.SQL(col.base_type), sql.Identifier(k)))
+            if op:
+                raise BadRequest(f"{k} is a list: only equality (contains) is supported", key)
+            where.append(sql.SQL("%s::{} = ANY(t.{})").format(sql.SQL(col.base_type), ident))
             params.append(v)
-        else:
-            where.append(sql.SQL("t.{} = ").format(sql.Identifier(k)) + _placeholder(model, col))
+        elif op == "in":
+            values = [_value(model, col, _parse_filter(col, x)) for x in v.split(",") if x != ""]
+            where.append(sql.SQL("t.{} = ANY(%s::{}[])").format(ident, sql.SQL(model.sql_type(col))))
+            params.append(values)
+        elif op in FILTER_OPS:
+            where.append(sql.SQL("t.{} {} ").format(ident, sql.SQL(FILTER_OPS[op])) + _placeholder(model, col))
             params.append(_value(model, col, _parse_filter(col, v)))
+        else:
+            raise BadRequest(f"unknown filter operator {op}", key)
     if q:
         search = [sql.SQL("t.{} ILIKE %s").format(sql.Identifier(c)) for c in table.search_columns()]
         if search:
@@ -122,8 +135,8 @@ def list_rows(conn: psycopg.Connection, model: Model, table: Table, org_id: UUID
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
 
-def _parse_filter(col: Column, v: str) -> Any:
-    if col.base_type == "boolean":
+def _parse_filter(col: Column, v: str, boolean: bool = False) -> Any:
+    if boolean or col.base_type == "boolean":
         if v.lower() not in ("true", "false"):
             raise BadRequest(f"{col.name} must be true or false", col.name)
         return v.lower() == "true"

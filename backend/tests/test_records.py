@@ -49,6 +49,7 @@ def test_validation_errors(client, login):
     r = client.post(base, headers=h, json={"number": "NC-2026-001", "title": "dup",
                                            "detected_on": "2026-01-01", "source": "other"})
     assert r.status_code == 409 and r.json()["error"] == "duplicate"
+    assert r.json()["column"] == "number" and r.json()["detail"] == "a record with the same number already exists"
 
 
 def test_filters_search_order_paging(client, login):
@@ -105,3 +106,15 @@ def test_approved_document_versions_are_frozen(client, login):
     r = client.patch(vurl, headers=h, json={"change_summary": "sneaky edit"})
     assert r.status_code == 409 and "read-only" in r.json()["detail"]
     assert client.delete(vurl, headers=h).status_code == 409
+
+
+def test_filter_operators(client, login):
+    h = login("qse@alpha.test")
+    base = f"/api/orgs/{ALPHA}/t/actions"
+    assert client.get(f"{base}?status__in=planned,in_progress", headers=h).json()["total"] == 2
+    assert client.get(f"{base}?status__ne=planned", headers=h).json()["total"] == 1
+    assert client.get(f"{base}?due_on__lt=2026-10-01", headers=h).json()["items"][0]["number"] == "AC-2026-001"
+    assert client.get(f"{base}?completed_on__isnull=true", headers=h).json()["total"] == 2
+    assert client.get(f"{base}?completed_on__isnull=false", headers=h).json()["total"] == 0
+    assert client.get(f"{base}?status__in=bogus", headers=h).status_code == 400
+    assert client.get(f"{base}?status__like=x", headers=h).status_code == 400
