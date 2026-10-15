@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { additionGroup, classify, type Input, rubrique, search, variants } from "@/lib/edii/classify";
+import { type Activity, classifyEstablishment, decodeActivities, encodeActivities } from "@/lib/edii/establishment";
 
 function classe(code: string, input: Input = {}) {
   const rub = rubrique(code);
@@ -92,6 +93,107 @@ describe("search and rules", () => {
     expect(additionGroup("2715")).toBe(2);
     expect(additionGroup("2505")).toBe(3);
     expect(additionGroup("2506")).toBeNull();
+  });
+});
+
+describe("establishment with several activities", () => {
+  const veaux = variants(rubrique("1101")!).findIndex((v) => v.startsWith("1) veaux"));
+
+  it("takes the most severe category of its activities", () => {
+    const est = classifyEstablishment([
+      { code: "1101", variant: veaux, quantity: "30", unit: "animaux" }, // 3ème
+      { code: "2502", quantity: "5", unit: "t" }, // 2ème
+    ]);
+    expect(est.results.map((r) => r.classe)).toEqual([3, 2]);
+    expect(est.classe).toBe(2);
+    expect(est.complete).toBe(true);
+    expect(est.decidedBy).toEqual(["rubrique 2502"]);
+  });
+
+  it("is incomplete while an activity lacks its case or quantity", () => {
+    const est = classifyEstablishment([{ code: "1101", quantity: "30", unit: "animaux" }, { code: "2502", quantity: "500", unit: "kg" }]);
+    expect(est.results[0].needsVariant).toBe(true);
+    expect(est.classe).toBe(3); // at least, from 2502
+    expect(est.complete).toBe(false);
+  });
+
+  it("is non classé when every activity is below its thresholds", () => {
+    const est = classifyEstablishment([{ code: "2502", quantity: "50", unit: "kg" }]);
+    expect(est.classe).toBe("NC");
+  });
+
+  it("uses the case the user picks when the text, not a number, decides", () => {
+    const rub = rubrique("2501")!;
+    const gaz = variants(rub).findIndex((v) => v === "");
+    const picked = rub.items.findIndex((i) => i.criterion.startsWith("2) pour l'obtention d'acétylène gazeux"));
+    const est = classifyEstablishment([{ code: "2501", variant: gaz, picked }]);
+    expect(est.classe).toBe(2);
+  });
+
+  it("round-trips through the URL form", () => {
+    const list: Activity[] = [
+      { code: "2722 bis 1", variant: 1, quantity: "1 500", unit: "kg", picked: -1 },
+      { code: "1401" },
+    ];
+    expect(decodeActivities(encodeActivities(list))).toEqual([list[0], { code: "1401", variant: undefined, quantity: undefined, unit: undefined, picked: undefined }]);
+    expect(decodeActivities("9999~~~~|1401~~~~")).toHaveLength(1); // unknown codes are dropped
+  });
+});
+
+describe("règle d'addition (arrêté 2010, art. 2 bis)", () => {
+  it("moves the establishment up when Σ q/Q of the next category exceeds 1", () => {
+    // acétylène 30 t and hydrogène 30 t are each 2ème; with the 1ère thresholds (50 t each): 0.6 + 0.6 = 1.2
+    const est = classifyEstablishment([
+      { code: "2502", quantity: "30", unit: "t" },
+      { code: "2509", quantity: "30", unit: "t" },
+    ]);
+    expect(est.results.map((r) => r.classe)).toEqual([2, 2]);
+    const [g] = est.additions;
+    expect(g.group).toBe(3);
+    expect(g.target).toBe(1);
+    expect(g.sum).toBeCloseTo(1.2);
+    expect(g.upgraded).toBe(true);
+    expect(est.classe).toBe(1);
+    expect(est.decidedBy).toEqual(["règle d'addition, groupe 3"]);
+  });
+
+  it("leaves the category alone when Σ q/Q ≤ 1", () => {
+    const est = classifyEstablishment([
+      { code: "2502", quantity: "20", unit: "t" },
+      { code: "2509", quantity: "20", unit: "t" },
+    ]);
+    expect(est.additions[0].sum).toBeCloseTo(0.8);
+    expect(est.additions[0].upgraded).toBe(false);
+    expect(est.classe).toBe(2);
+  });
+
+  it("classes in 3ème substances that are each below their own threshold", () => {
+    // acétylène 60 kg (3ème from 100 kg) + hydrogène 20 kg (3ème from 30 kg): 0.6 + 0.667 > 1
+    const est = classifyEstablishment([
+      { code: "2502", quantity: "60", unit: "kg" },
+      { code: "2509", quantity: "20", unit: "kg" },
+    ]);
+    expect(est.results.map((r) => r.classe)).toEqual(["NC", "NC"]);
+    expect(est.additions[0].target).toBe(3);
+    expect(est.classe).toBe(3);
+  });
+
+  it("only adds up substances of the same group", () => {
+    const est = classifyEstablishment([
+      { code: "2502", quantity: "30", unit: "t" }, // group 3
+      { code: "2720", quantity: "40", unit: "t" }, // group 2
+    ]);
+    expect(est.additions).toEqual([]);
+    expect(est.classe).toBe(2);
+  });
+
+  it("cannot go above 1ère", () => {
+    const est = classifyEstablishment([
+      { code: "2502", quantity: "60", unit: "t" },
+      { code: "2509", quantity: "10", unit: "t" },
+    ]);
+    expect(est.additions[0].target).toBeNull();
+    expect(est.classe).toBe(1);
   });
 });
 

@@ -177,11 +177,15 @@ button.link { background: none; border: none; color: inherit; padding: 0 0 0 4px
 .edii-sections .chip { text-align: left; color: var(--text); }
 .edii-sections .chip.on { color: var(--accent); }
 .edii-results { list-style: none; margin: 8px 0 0; padding: 0; }
-.edii-results button, .edii-choices button {
+.edii-results button {
   display: block; width: 100%; text-align: left; border: none; background: none; color: var(--text); padding: 7px 8px; border-radius: 6px; cursor: pointer;
 }
-.edii-results button:hover, .edii-choices button:hover { background: var(--surface-2); }
-.edii-results button.on, .edii-choices button.on { background: var(--info-bg); }
+.edii-results li { display: flex; gap: 4px; align-items: flex-start; }
+.edii-results button:hover { background: var(--surface-2); }
+.edii-results button.on { background: var(--info-bg); }
+.edii-results .edii-add {
+  flex: none; width: 32px; text-align: center; padding: 6px 0; border: 1px solid var(--border); color: var(--accent); font-weight: 600;
+}
 .edii-results .tag { margin-left: 6px; }
 .edii-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .edii-text { line-height: 1.5; }
@@ -190,9 +194,23 @@ button.link { background: none; border: none; color: inherit; padding: 0 0 0 4px
 .edii-note { background: var(--info-bg); border-radius: 6px; padding: 8px 10px; }
 .edii-qty { display: flex; gap: 6px; }
 .edii-qty input { flex: 1; min-width: 0; }
-.edii-result { margin-top: 14px; }
-.edii-choices { list-style: none; padding: 0; margin: 8px 0; }
-.edii-picked { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+.edii-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.edii-link { background: none; border: none; color: var(--accent); padding: 0 4px 0 0; font-weight: 400; text-align: left; }
+.edii-link:hover { text-decoration: underline; }
+.edii-est { border-color: var(--accent); }
+.edii-verdict { display: flex; gap: 14px; align-items: center; margin: 4px 0 14px; }
+.edii-acts td { white-space: normal; max-width: none; vertical-align: top; }
+.edii-acts td:first-child { width: 34%; }
+.edii-acts .tag { margin-left: 4px; }
+.edii-case { width: 100%; max-width: 420px; margin-bottom: 6px; }
+.edii-why { margin-top: 4px; }
+.edii-remove { padding: 2px 9px; }
+.edii-addition { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-top: 14px; }
+.edii-addition.up { border-color: var(--bad); }
+.edii-addition p { margin: 4px 0 10px; }
+.edii-sum td { white-space: normal; }
+.edii-total td { font-weight: 600; }
+.edii-sum-verdict { margin-top: 10px !important; }
 .edii-steps { padding-left: 18px; line-height: 1.7; }
 .edii-big { font-size: 16px; padding: 4px 14px; font-weight: 600; }
 .edii-c1 { background: var(--bad-bg); color: var(--bad); }
@@ -202,4 +220,11 @@ button.link { background: none; border: none; color: inherit; padding: 0 0 0 4px
 @media (max-width: 800px) {
   .edii-layout { grid-template-columns: 1fr; }
   .edii-list { position: static; max-height: none; }
+  .edii-verdict { flex-direction: column; align-items: flex-start; }
+  .edii-acts thead { display: none; }
+  .edii-acts tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--border); padding: 6px 0; }
+  .edii-acts td { display: block; border: none; padding: 4px 10px; width: auto !important; }
+  .edii-acts td:nth-child(2), .edii-acts td:nth-child(3) { grid-column: 1 / -1; }
+  .edii-acts td:nth-child(4) { grid-column: 2; grid-row: 1; }
+  .edii-items td, .edii-sum td, .edii-sum th { padding: 8px; }
 }

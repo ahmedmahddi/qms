@@ -1,24 +1,32 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   additionGroup,
-  classify,
   type Classe,
   describe,
-  inputUnits,
   type Item,
   nomenclature,
-  type Outcome,
   type Rubrique,
   rubrique,
   search,
   variants,
 } from "@/lib/edii/classify";
+import {
+  type Activity,
+  type ActivityResult,
+  type AdditionResult,
+  classifyEstablishment,
+  decodeActivities,
+  encodeActivities,
+  type EstablishmentResult,
+  fmtRatio,
+} from "@/lib/edii/establishment";
 
 const LABEL: Record<string, string> = { "1": "1ère catégorie", "2": "2ème catégorie", "3": "3ème catégorie", NC: "Non classé" };
 const SOURCE = Object.fromEntries(nomenclature.sources.map((s) => [s.id, s]));
+const ordinal = (c: Classe) => (c === "NC" ? "non classé" : `${c}${c === 1 ? "ère" : "ème"}`);
 
 function ClasseBadge({ classe, big }: { classe: Classe; big?: boolean }) {
   return <span className={`badge edii-c${classe} ${big ? "edii-big" : ""}`}>{LABEL[String(classe)]}</span>;
@@ -37,7 +45,20 @@ function Edii() {
   const router = useRouter();
   const [query, setQuery] = useState(params.get("q") ?? "");
   const [section, setSection] = useState<string | null>(null);
-  const selected = rubrique(params.get("code") ?? "");
+  const [code, setCode] = useState(params.get("code"));
+  const [activities, setActivities] = useState<Activity[]>(() => decodeActivities(params.get("e")));
+  const selected = rubrique(code ?? "");
+  const est = useMemo(() => classifyEstablishment(activities), [activities]);
+
+  // The state lives here; the URL follows it, so a classification can be bookmarked or shared.
+  // (Reading the list back from the URL on each change would lose edits made in quick succession.)
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (code) p.set("code", code);
+    if (activities.length) p.set("e", encodeActivities(activities));
+    if (query.trim()) p.set("q", query.trim());
+    router.replace(`/edii${p.size ? `?${p}` : ""}`, { scroll: false });
+  }, [code, activities, query, router]);
 
   const results = useMemo(() => {
     if (query.trim()) return search(query, 60);
@@ -45,7 +66,11 @@ function Edii() {
     return [];
   }, [query, section]);
 
-  const open = (code: string) => router.replace(`/edii?code=${encodeURIComponent(code)}${query ? `&q=${encodeURIComponent(query)}` : ""}`);
+  const open = (c: string) => setCode(c);
+  const add = (c: string) => setActivities((list) => [...list, { code: c }]);
+  const update = (i: number, patch: Partial<Activity>) => setActivities((list) => list.map((a, j) => (j === i ? { ...a, ...patch } : a)));
+  const remove = (i: number) => setActivities((list) => list.filter((_, j) => j !== i));
+  const count = (code: string) => activities.filter((a) => a.code === code).length;
 
   return (
     <div className="page edii">
@@ -91,16 +116,30 @@ function Edii() {
           <ul className="edii-results">
             {results.map((r) => (
               <li key={r.code}>
-                <button className={selected?.code === r.code ? "on" : ""} onClick={() => open(r.code)}>
+                <button className={`edii-open ${selected?.code === r.code ? "on" : ""}`} onClick={() => open(r.code)}>
                   <span className="mono">{r.code}</span> {r.title}
                   {r.kind === "definition" ? <span className="tag">définition</span> : null}
                 </button>
+                {r.kind === "activity" ? (
+                  <button className="edii-add" title="Ajouter à l'établissement" aria-label={`Ajouter ${r.code} à l'établissement`} onClick={() => add(r.code)}>
+                    {count(r.code) ? `✓${count(r.code) > 1 ? count(r.code) : ""}` : "+"}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
         </aside>
 
-        <main>{selected ? <RubriqueView key={selected.code} rub={selected} onOpen={open} /> : <Intro />}</main>
+        <main>
+          {activities.length ? (
+            <EstablishmentCard est={est} update={update} remove={remove} clear={() => setActivities([])} open={open} />
+          ) : null}
+          {selected ? (
+            <RubriqueView key={selected.code} rub={selected} count={count(selected.code)} onAdd={() => add(selected.code)} onOpen={open} />
+          ) : activities.length ? null : (
+            <Intro />
+          )}
+        </main>
       </div>
     </div>
   );
@@ -111,14 +150,16 @@ function Intro() {
     <div className="card">
       <h2>Comment ça marche</h2>
       <ol className="edii-steps">
-        <li>Chercher l&apos;activité ou la substance, ou parcourir une section.</li>
-        <li>Ouvrir la rubrique, choisir le cas qui s&apos;applique et saisir la capacité ou la quantité.</li>
-        <li>Le classement (1ère, 2ème, 3ème catégorie ou non classé) est calculé à partir des seuils du texte.</li>
+        <li>Chercher chaque activité ou substance de l&apos;établissement, ou parcourir une section.</li>
+        <li>L&apos;ajouter à l&apos;établissement avec « + », puis choisir le cas et saisir la capacité ou la quantité.</li>
+        <li>
+          Chaque activité est classée d&apos;après les seuils du texte ; l&apos;établissement prend la catégorie la plus élevée, et la règle
+          d&apos;addition est appliquée aux substances d&apos;un même groupe.
+        </li>
       </ol>
       <p className="muted small">
-        Les seuils ont été lus par OCR sur les textes publiés au JORT puis vérifiés (voir <span className="mono">edii/review.md</span>). Un
-        établissement qui exerce plusieurs activités relève de la catégorie la plus élevée de ses rubriques. Outil d&apos;aide : le texte
-        officiel fait foi.
+        Les seuils ont été lus par OCR sur les textes publiés au JORT puis vérifiés (voir <span className="mono">edii/review.md</span>). Outil
+        d&apos;aide : le texte officiel fait foi.
       </p>
       <h3>Textes</h3>
       <ul className="small">
@@ -132,183 +173,297 @@ function Intro() {
   );
 }
 
-function RubriqueView({ rub, onOpen }: { rub: Rubrique; onOpen: (code: string) => void }) {
-  const cases = variants(rub);
-  const [variant, setVariant] = useState<string | undefined>(cases.length === 1 ? cases[0] : undefined);
-  const scope = variant === undefined ? rub : { ...rub, items: rub.items.filter((i) => i.path.join(" › ") === variant) };
-  const units = inputUnits(scope);
-  const [quantity, setQuantity] = useState("");
-  const [chosenUnit, setUnit] = useState("");
-  const unit = units.includes(chosenUnit) ? chosenUnit : (units[0] ?? "");
-  const [picked, setPicked] = useState<Item | null>(null);
-  const group = additionGroup(rub.code);
-
-  const value = quantity.trim() === "" ? undefined : Number(quantity.replace(",", ".").replace(/\s/g, ""));
-  const needsVariant = cases.length > 1 && variant === undefined;
-  const outcome: Outcome | null = needsVariant ? null : classify(rub, { variant, quantity: Number.isFinite(value) ? value : undefined, unit });
-
-  const caseLabel = (v: string) =>
-    v ||
-    rub.items
-      .filter((i) => i.path.length === 0)
-      .map((i) => i.criterion || rub.title)
-      .join(" / ");
-
+function EstablishmentCard({
+  est,
+  update,
+  remove,
+  clear,
+  open,
+}: {
+  est: EstablishmentResult;
+  update: (i: number, patch: Partial<Activity>) => void;
+  remove: (i: number) => void;
+  clear: () => void;
+  open: (code: string) => void;
+}) {
   return (
-    <>
-      <div className="card">
-        <div className="edii-head">
-          <h2>
-            <span className="mono">{rub.code}</span> {rub.title}
-          </h2>
-          <span className="muted small">
-            {rub.replaces ? `Modifiée par l'arrêté de ${rub.source}` : rub.source === "2005" ? "Arrêté de 2005" : `Ajoutée par l'arrêté de ${rub.source}`}
-          </span>
-        </div>
-        <p className="edii-text">{rub.text}</p>
-        {group ? (
-          <p className="edii-note small">
-            Règle d&apos;addition (art. 2 bis, arrêté du 23 février 2010) : groupe {group}. Si l&apos;établissement détient plusieurs
-            substances du groupe, Σ qx/Qx &gt; 1 le classe dans la catégorie supérieure.
-          </p>
-        ) : null}
-        {rub.items.length ? (
-          <div className="table-wrap">
-            <table className="grid edii-items">
-              <thead>
-                <tr>
-                  <th>Cas</th>
-                  <th>Seuil</th>
-                  <th>Catégorie</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rub.items.map((it, i) => (
-                  <tr key={i}>
-                    <td>
-                      {it.path.length ? <div className="muted small">{it.path.join(" › ")}</div> : null}
-                      {it.criterion || rub.title}
-                    </td>
-                    <td>
-                      {describe(it.condition)}
-                      {it.condition?.unit_inferred ? <span className="tag" title="Unité déduite des autres lignes">déduite</span> : null}
-                    </td>
-                    <td>
-                      <ClasseBadge classe={it.category} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+    <div className="card edii-est">
+      <div className="edii-head">
+        <h2>Établissement</h2>
+        <button className="ghost small" onClick={clear}>
+          Tout retirer
+        </button>
       </div>
 
-      <div className="card">
-        <h2>Classer un établissement</h2>
-        {rub.kind === "definition" || rub.items.length === 0 ? null : (
-          <div className="form">
-            {cases.length > 1 ? (
-              <div className="field wide">
-                <label>Cas</label>
-                <select value={variant === undefined ? "" : String(cases.indexOf(variant))} onChange={(e) => (setVariant(e.target.value === "" ? undefined : cases[Number(e.target.value)]), setPicked(null))}>
-                  <option value="">Choisir le cas qui s&apos;applique…</option>
-                  {cases.map((v, i) => (
-                    <option key={i} value={i}>
-                      {caseLabel(v)}
-                    </option>
-                  ))}
-                </select>
+      <div className="edii-verdict">
+        {est.classe === null ? (
+          <span className="muted">Compléter les activités pour obtenir le classement.</span>
+        ) : (
+          <>
+            <ClasseBadge classe={est.classe} big />
+            <div>
+              {est.complete ? (
+                <span>Catégorie de l&apos;établissement, déterminée par {listFr(est.decidedBy)}.</span>
+              ) : (
+                <span>
+                  Au moins cette catégorie (par {listFr(est.decidedBy)}) : des activités restent à compléter et peuvent la relever.
+                </span>
+              )}
+              <div className="muted small">
+                L&apos;établissement prend la catégorie la plus élevée de ses activités : il dépose une seule demande pour l&apos;ensemble
+                (décret n° 2006-2687, art. 5).
               </div>
-            ) : null}
-            {units.length ? (
-              <div className="field">
-                <label>Quantité ou capacité</label>
-                <div className="edii-qty">
-                  <input inputMode="decimal" value={quantity} onChange={(e) => (setQuantity(e.target.value), setPicked(null))} placeholder="ex. 1500" />
-                  <select value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="Unité">
-                    {units.map((u) => (
-                      <option key={u}>{u}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ) : null}
-          </div>
+            </div>
+          </>
         )}
-        <Result outcome={outcome} picked={picked} onPick={setPicked} onOpen={onOpen} needsVariant={needsVariant} />
       </div>
-    </>
+
+      <div className="table-wrap">
+        <table className="grid edii-acts">
+          <thead>
+            <tr>
+              <th>Rubrique</th>
+              <th>Cas et quantité</th>
+              <th>Classement</th>
+              <th aria-label="Retirer" />
+            </tr>
+          </thead>
+          <tbody>
+            {est.results.map((r, i) => (
+              <ActivityRow key={i} r={r} update={(p) => update(i, p)} remove={() => remove(i)} open={open} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {est.additions.map((a) => (
+        <AdditionPanel key={a.group} a={a} />
+      ))}
+    </div>
   );
 }
 
-function Result({
-  outcome,
-  picked,
-  onPick,
-  onOpen,
-  needsVariant,
+function ActivityRow({
+  r,
+  update,
+  remove,
+  open,
 }: {
-  outcome: Outcome | null;
-  picked: Item | null;
-  onPick: (i: Item) => void;
-  onOpen: (code: string) => void;
-  needsVariant: boolean;
+  r: ActivityResult;
+  update: (p: Partial<Activity>) => void;
+  remove: () => void;
+  open: (code: string) => void;
 }) {
-  if (needsVariant || !outcome) return <p className="muted">Choisir d&apos;abord le cas qui s&apos;applique.</p>;
-  switch (outcome.status) {
-    case "classified":
-      return (
-        <div className="edii-result">
-          <ClasseBadge classe={outcome.classe} big />
-          <p>{outcome.reason}</p>
-          {outcome.items[0] ? <p className="muted small">Source : {sourceOf(outcome.items[0])}</p> : null}
-          {outcome.notes.map((n) => (
-            <p key={n} className="edii-note small">
-              {n}
-            </p>
-          ))}
-        </div>
-      );
-    case "choose":
-      return (
-        <div className="edii-result">
-          <p>{outcome.reason}</p>
-          <ul className="edii-choices">
-            {outcome.items.map((it, i) => (
-              <li key={i}>
-                <button className={picked === it ? "on" : ""} onClick={() => onPick(it)}>
-                  <ClasseBadge classe={it.category} /> {it.criterion}
-                </button>
-              </li>
+  const cases = variants(r.rub);
+  const group = additionGroup(r.rub.code);
+  const caseLabel = (v: string) => v || r.rub.items.filter((i) => i.path.length === 0).map((i) => i.criterion || r.rub.title).join(" / ");
+  const o = r.outcome;
+  return (
+    <tr>
+      <td>
+        <button className="edii-link" onClick={() => open(r.rub.code)}>
+          <span className="mono">{r.rub.code}</span> {r.rub.title}
+        </button>
+        {group ? <span className="tag" title="Règle d'addition, arrêté du 23 février 2010, art. 2 bis">groupe {group}</span> : null}
+      </td>
+      <td>
+        {cases.length > 1 ? (
+          <select
+            className="edii-case"
+            value={r.variant === undefined ? "" : String(cases.indexOf(r.variant))}
+            onChange={(e) => update({ variant: e.target.value === "" ? undefined : Number(e.target.value), picked: undefined })}
+          >
+            <option value="">Choisir le cas…</option>
+            {cases.map((v, i) => (
+              <option key={i} value={i}>
+                {caseLabel(v)}
+              </option>
             ))}
-          </ul>
-          {outcome.belowAll ? <p className="muted small">Si aucun de ces cas ne s&apos;applique : non classé au titre de cette rubrique.</p> : null}
-          {picked ? (
-            <div className="edii-picked">
-              <ClasseBadge classe={picked.category} big /> <span className="muted small">Source : {sourceOf(picked)}</span>
-            </div>
-          ) : null}
-        </div>
-      );
-    case "needs_quantity":
-      return <p className="muted">{outcome.reason}</p>;
-    case "unit_mismatch":
-      return <p className="error">{outcome.reason}</p>;
-    case "definition":
-      return (
-        <div className="edii-result">
-          <p className="muted">{outcome.reason}</p>
-          <div className="chips">
-            {outcome.related.map((c) => (
-              <button key={c} className="chip" onClick={() => onOpen(c)}>
+          </select>
+        ) : null}
+        {r.units.length && !r.needsVariant ? (
+          <div className="edii-qty">
+            <input
+              inputMode="decimal"
+              value={r.activity.quantity ?? ""}
+              placeholder="Quantité"
+              aria-label={`Quantité pour ${r.rub.code}`}
+              onChange={(e) => update({ quantity: e.target.value, picked: undefined })}
+            />
+            <select value={r.unit} onChange={(e) => update({ unit: e.target.value, picked: undefined })} aria-label="Unité">
+              {r.units.map((u) => (
+                <option key={u}>{u}</option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </td>
+      <td>
+        {r.classe !== null ? <ClasseBadge classe={r.classe} /> : null}
+        {r.needsVariant ? <span className="muted small">Choisir le cas</span> : null}
+        {o?.status === "needs_quantity" ? <span className="muted small">Saisir la quantité</span> : null}
+        {o?.status === "unit_mismatch" ? <span className="error small">{o.reason}</span> : null}
+        {o?.status === "definition" ? (
+          <span className="small">
+            Définition, voir{" "}
+            {o.related.map((c) => (
+              <button key={c} className="edii-link" onClick={() => open(c)}>
                 {c}
               </button>
             ))}
-          </div>
+          </span>
+        ) : null}
+        {o?.status === "choose" ? (
+          <select
+            className="edii-case"
+            value={r.activity.picked === undefined ? "" : String(r.activity.picked)}
+            onChange={(e) => update({ picked: e.target.value === "" ? undefined : Number(e.target.value) })}
+            title={o.reason}
+          >
+            <option value="">Préciser le cas…</option>
+            {o.items.map((it) => {
+              const idx = r.rub.items.indexOf(it);
+              return (
+                <option key={idx} value={idx}>
+                  {LABEL[it.category]} : {it.criterion}
+                </option>
+              );
+            })}
+            {o.belowAll ? <option value={-1}>Aucun de ces cas : non classé</option> : null}
+          </select>
+        ) : null}
+        {r.item ? <div className="muted small edii-why">{r.item.criterion}</div> : null}
+      </td>
+      <td>
+        <button className="ghost edii-remove" onClick={remove} aria-label={`Retirer ${r.rub.code}`}>
+          ×
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function AdditionPanel({ a }: { a: AdditionResult }) {
+  return (
+    <div className={`edii-addition ${a.upgraded ? "up" : ""}`}>
+      <h3>Règle d&apos;addition, groupe {a.group}</h3>
+      <p className="small muted">
+        Arrêté du 23 février 2010, art. 2 bis : l&apos;établissement détient plusieurs substances du groupe {a.group}. Prises une à une, elles le
+        classent au plus en {ordinal(a.base)}
+        {a.target ? ` ; chaque quantité qx est comparée au seuil Qx de la ${ordinal(a.target)} catégorie.` : "."}
+      </p>
+      {a.target ? (
+        <table className="grid edii-sum">
+          <thead>
+            <tr>
+              <th>Rubrique</th>
+              <th>qx</th>
+              <th>Qx ({ordinal(a.target)})</th>
+              <th>qx / Qx</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.members.map((m, i) => (
+              <tr key={i}>
+                <td>
+                  <span className="mono">{m.result.rub.code}</span> {m.result.rub.title}
+                </td>
+                <td>{m.result.q ? fmtQty(m.result.q.value, m.result.q.unit) : "—"}</td>
+                <td>{m.Q !== null && m.result.q ? fmtQty(m.Q, m.result.q.unit) : <span className="muted small">{m.note}</span>}</td>
+                <td>{m.ratio !== null ? fmtRatio(m.ratio) : "—"}</td>
+              </tr>
+            ))}
+            <tr className="edii-total">
+              <td colSpan={3}>Σ qx / Qx</td>
+              <td>{fmtRatio(a.sum)}</td>
+            </tr>
+          </tbody>
+        </table>
+      ) : null}
+      <p className="edii-sum-verdict">
+        {a.upgraded ? <ClasseBadge classe={a.target!} /> : null} {a.reason}
+      </p>
+    </div>
+  );
+}
+
+const listFr = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} et ${xs[xs.length - 1]}`);
+
+function fmtQty(v: number, unit: string) {
+  if (unit === "kg" && v >= 1000) return `${(v / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 3 })} t`;
+  return `${v.toLocaleString("fr-FR", { maximumFractionDigits: 3 })} ${unit}`;
+}
+
+function RubriqueView({ rub, count, onAdd, onOpen }: { rub: Rubrique; count: number; onAdd: () => void; onOpen: (code: string) => void }) {
+  const group = additionGroup(rub.code);
+  const related =
+    rub.kind === "definition"
+      ? nomenclature.rubriques.filter((r) => r.code !== rub.code && r.code.startsWith(`${rub.code.split(" ")[0]} bis`)).map((r) => r.code)
+      : [];
+  return (
+    <div className="card">
+      <div className="edii-head">
+        <h2>
+          <span className="mono">{rub.code}</span> {rub.title}
+        </h2>
+        <span className="muted small">
+          {rub.replaces ? `Modifiée par l'arrêté de ${rub.source}` : rub.source === "2005" ? "Arrêté de 2005" : `Ajoutée par l'arrêté de ${rub.source}`}
+        </span>
+      </div>
+      <p className="edii-text">{rub.text}</p>
+      {group ? (
+        <p className="edii-note small">
+          Règle d&apos;addition (art. 2 bis, arrêté du 23 février 2010) : groupe {group}. Si l&apos;établissement détient plusieurs substances du
+          groupe, Σ qx/Qx &gt; 1 le classe dans la catégorie supérieure.
+        </p>
+      ) : null}
+      {rub.items.length ? (
+        <div className="table-wrap">
+          <table className="grid edii-items">
+            <thead>
+              <tr>
+                <th>Cas</th>
+                <th>Seuil</th>
+                <th>Catégorie</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rub.items.map((it, i) => (
+                <tr key={i}>
+                  <td>
+                    {it.path.length ? <div className="muted small">{it.path.join(" › ")}</div> : null}
+                    {it.criterion || rub.title}
+                  </td>
+                  <td>
+                    {describe(it.condition)}
+                    {it.condition?.unit_inferred ? <span className="tag" title="Unité déduite des autres lignes">déduite</span> : null}
+                  </td>
+                  <td>
+                    <ClasseBadge classe={it.category} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      );
-  }
+      ) : null}
+      <div className="edii-actions">
+        {rub.kind === "activity" ? (
+          <button onClick={onAdd}>{count ? "Ajouter encore à l'établissement" : "Ajouter à l'établissement"}</button>
+        ) : (
+          <span className="muted small">
+            Cette rubrique définit une famille de substances ; ajouter plutôt{" "}
+            {related.map((c) => (
+              <button key={c} className="edii-link" onClick={() => onOpen(c)}>
+                {c}
+              </button>
+            ))}
+          </span>
+        )}
+        {rub.items[0] ? <span className="muted small">Source : {sourceOf(rub.items[0])}</span> : null}
+      </div>
+    </div>
+  );
 }
 
 function sourceOf(it: Item): string {

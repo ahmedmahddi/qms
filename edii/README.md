@@ -69,7 +69,11 @@ Run `npm run edii:parse` and commit the result. `tests/edii.test.ts` fails when
 
 ## Classifying
 
-`lib/edii/classify.ts` (UI at `/edii`):
+The page at `/edii` classifies a whole establishment. Search each activity or substance, add it
+with "+", then choose its case and enter its quantity. The list is kept in the URL, so a
+classification can be bookmarked or shared.
+
+`lib/edii/classify.ts` classifies one rubrique:
 
 * `search(query)`: rubriques by code (`2722 bis`) or words, ignoring accents.
 * `classify(rubrique, { variant, quantity, unit })`: returns one of these outcomes:
@@ -83,12 +87,30 @@ Units convert to the canonical unit of each threshold: t ↔ kg, l ↔ m3, kg/j 
 When a condition can't be reduced to one number (two thresholds at once, or no unit), the
 classifier shows the text instead of guessing.
 
+`lib/edii/establishment.ts` combines the activities:
+
+* **Several activities.** The establishment takes the most severe category of its activities.
+  Décret n° 2006-2687, art. 5: an establishment with several classified activities makes a single
+  request, has a single public enquiry and gets a single authorisation.
+* **Règle d'addition** (arrêté du 23 février 2010, art. 2 bis). When the establishment stores or
+  uses two or more substances of the same group, it computes Σ qx/Qx. If the sum is above 1, the
+  establishment is classed in *la catégorie supérieure qui suit*.
+  * qx is the quantity held.
+  * Qx is the threshold of the category just above the group's current one (the most severe
+    category of its substances taken one by one, or 3ème when they are all non classé). At their
+    own category, each classified substance alone would already reach 1, so the rule would always apply.
+  * The groups are:
+    * Groupe 1: 2703, 2704, 2706, 2708, 2722 bis 1, 2722 bis 2, 2723, 2724 bis 1, 2724 bis 2, 2725, 2726.
+    * Groupe 2: 2711, 2712, 2713, 2715, 2720.
+    * Groupe 3: the 2100 rubriques, 2402 to 2408, and the 2500 rubriques except 2503, 2506, 2507 bis, 2514, 2516.
+  * Example: acétylène 30 t (2502) and hydrogène 30 t (2509) are each 2ème catégorie. With the 1ère
+    thresholds (50 t each), 30/50 + 30/50 = 1.2 > 1, so the establishment is classed 1ère catégorie.
+
 ## Not done yet
 
-* **Addition rule** (arrêté 2010, art. 2 bis): for several substances of one group, Σ qx/Qx > 1
-  raises the category. The page shows which group a rubrique belongs to, but does not compute the rule.
-* **Several activities**: the establishment takes the most severe category of its rubriques.
-  Today the page classifies one rubrique at a time.
+* **Reading of the addition rule**: the text does not say which threshold Qx is. The reading
+  above (the category just above) is the only one under which the rule can ever leave a category
+  unchanged; it should be confirmed.
 * **Reading of 2724**: the 2010 text restates rubrique 2724 as a definition only, in its "complete"
   annex, and moves the thresholds to 2724 bis 1 and bis 2. The parser treats the restatement as a
   replacement. This reading should be confirmed (see `review.md`).

@@ -28,6 +28,13 @@
       "find": "supérieure à 12001",
       "replace": "supérieure à 1200 l",
       "why": "litre glued to the number"
+    },
+    {
+      "source": "2005",
+      "page": 24,
+      "find": "loxiques particulières",
+      "replace": "Toxiques particulières",
+      "why": "T read as l"
     }
   ],
   "category": [
