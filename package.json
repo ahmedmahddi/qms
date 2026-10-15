@@ -12,7 +12,9 @@
     "test": "vitest run",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "db:gen": "cd db && python3 gen.py"
+    "db:gen": "cd db && python3 gen.py",
+    "edii:ocr": "python3 -I edii/pipeline/ocr.py",
+    "edii:parse": "python3 -I edii/pipeline/parse.py"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",

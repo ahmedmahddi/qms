@@ -169,3 +169,37 @@ button.link { background: none; border: none; color: inherit; padding: 0 0 0 4px
   .page { padding: 16px; }
   .user { display: none; }
 }
+
+/* EDII classification */
+.edii-layout { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.edii-list { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.edii-search { width: 100%; margin-bottom: 12px; }
+.edii-sections .chip { text-align: left; color: var(--text); }
+.edii-sections .chip.on { color: var(--accent); }
+.edii-results { list-style: none; margin: 8px 0 0; padding: 0; }
+.edii-results button, .edii-choices button {
+  display: block; width: 100%; text-align: left; border: none; background: none; color: var(--text); padding: 7px 8px; border-radius: 6px; cursor: pointer;
+}
+.edii-results button:hover, .edii-choices button:hover { background: var(--surface-2); }
+.edii-results button.on, .edii-choices button.on { background: var(--info-bg); }
+.edii-results .tag { margin-left: 6px; }
+.edii-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.edii-text { line-height: 1.5; }
+.edii-items td { white-space: normal; max-width: none; vertical-align: top; }
+.edii-items .tag { margin-left: 6px; }
+.edii-note { background: var(--info-bg); border-radius: 6px; padding: 8px 10px; }
+.edii-qty { display: flex; gap: 6px; }
+.edii-qty input { flex: 1; min-width: 0; }
+.edii-result { margin-top: 14px; }
+.edii-choices { list-style: none; padding: 0; margin: 8px 0; }
+.edii-picked { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+.edii-steps { padding-left: 18px; line-height: 1.7; }
+.edii-big { font-size: 16px; padding: 4px 14px; font-weight: 600; }
+.edii-c1 { background: var(--bad-bg); color: var(--bad); }
+.edii-c2 { background: var(--warn-bg); color: var(--warn); }
+.edii-c3 { background: var(--info-bg); color: var(--accent); }
+.edii-cNC { background: var(--ok-bg); color: var(--ok); }
+@media (max-width: 800px) {
+  .edii-layout { grid-template-columns: 1fr; }
+  .edii-list { position: static; max-height: none; }
+}
