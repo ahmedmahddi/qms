@@ -14,7 +14,8 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:gen": "cd db && python3 gen.py",
     "edii:ocr": "python3 -I edii/pipeline/ocr.py",
-    "edii:parse": "python3 -I edii/pipeline/parse.py"
+    "edii:parse": "python3 -I edii/pipeline/parse.py",
+    "edii:eie": "python3 -I edii/pipeline/eie.py"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",

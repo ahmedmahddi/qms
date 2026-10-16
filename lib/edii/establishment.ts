@@ -30,6 +30,7 @@ export interface Activity {
   quantity?: string; // as typed: "1 500", "2,5"
   unit?: string;
   picked?: number; // index in rubrique.items of the case the user chose; -1: none of them applies
+  eie?: string; // entry of décret n° 2005-1991 ("A14", "CDC8"…), or "none" when in neither annex
 }
 
 export interface ActivityResult {
@@ -174,10 +175,10 @@ export function classifyEstablishment(activities: Activity[]): EstablishmentResu
   };
 }
 
-/** Compact, URL-safe form of the activity list: "1101~0~120~animaux~|2502~~5~t~". */
+/** Compact, URL-safe form of the activity list: "1101~0~120~animaux~~CDC8|2502~~5~t~~none". */
 export function encodeActivities(list: Activity[]): string {
   const clean = (s: string | number | undefined) => (s === undefined ? "" : String(s).replace(/[~|]/g, ""));
-  return list.map((a) => [a.code, a.variant, a.quantity, a.unit, a.picked].map(clean).join("~")).join("|");
+  return list.map((a) => [a.code, a.variant, a.quantity, a.unit, a.picked, a.eie].map(clean).join("~").replace(/~+$/, "")).join("|");
 }
 
 export function decodeActivities(s: string | null): Activity[] {
@@ -187,11 +188,12 @@ export function decodeActivities(s: string | null): Activity[] {
     .split("|")
     .map((part) => part.split("~"))
     .filter(([code]) => !!code && !!rubrique(code))
-    .map(([code, variant, quantity, unit, picked]) => ({
+    .map(([code, variant, quantity, unit, picked, eie]) => ({
       code,
       variant: int(variant),
       quantity: quantity || undefined,
       unit: unit || undefined,
       picked: int(picked),
+      eie: eie || undefined,
     }));
 }

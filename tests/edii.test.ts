@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { additionGroup, classify, type Input, rubrique, search, variants } from "@/lib/edii/classify";
 import { type Activity, classifyEstablishment, decodeActivities, encodeActivities } from "@/lib/edii/establishment";
-import { establishmentStudy, studyFor } from "@/lib/edii/studies";
+import { eie, eieEntry, entriesFor, establishmentStudy, studyFor } from "@/lib/edii/studies";
 
 function classe(code: string, input: Input = {}) {
   const rub = rubrique(code);
@@ -211,31 +211,63 @@ it("edii/nomenclature.json matches the OCR output and corrections", () => {
 });
 
 describe("études ANPE (décret n° 2005-1991)", () => {
+  it("has every entry of the decree's annexes", () => {
+    const count = (k: string) => eie.entries.filter((e) => e.annexe === k).length;
+    expect([count("A"), count("B"), count("CDC")]).toEqual([24, 26, 18]);
+    expect(eieEntry("B19")?.text).toBe("Unités de tannerie et de mégisserie");
+    expect(eieEntry("CDC6")?.text).toBe("Les unités de trituration d'olive (huileries)");
+  });
+
+  it("suggests entries for a rubrique, never only those", () => {
+    const { suggested, others } = entriesFor("1213"); // huiles végétales
+    expect(suggested.map((e) => e.id)).toEqual(["A14", "CDC6", "CDC7"]);
+    expect(suggested.length + others.length).toBe(eie.entries.length);
+  });
+
   it("picks the study for one activity", () => {
-    expect(studyFor("A", "projet")).toBe("eie_a");
-    expect(studyFor("B", "projet")).toBe("eie_b");
-    expect(studyFor("CDC", "projet")).toBe("cahier_des_charges");
-    expect(studyFor("A", "existant")).toBe("depollution");
-    expect(studyFor("CDC", "existant")).toBe("depollution");
-    expect(studyFor("none", "projet")).toBe("demande_avis");
-    expect(studyFor("none", "existant")).toBe("demande_avis");
+    expect(studyFor(eieEntry("A3"), "projet")).toBe("eie_a");
+    expect(studyFor(eieEntry("B19"), "projet")).toBe("eie_b");
+    expect(studyFor(eieEntry("CDC8"), "projet")).toBe("cahier_des_charges");
+    expect(studyFor(eieEntry("B19"), "extension")).toBe("eie_b"); // art. 12
+    expect(studyFor(eieEntry("A3"), "existant")).toBe("depollution");
+    expect(studyFor(eieEntry("CDC8"), "existant")).toBe("depollution");
+    expect(studyFor(undefined, "projet")).toBe("demande_avis");
+    expect(studyFor(undefined, "existant")).toBe("demande_avis");
   });
 
   it("keeps the most demanding study for the establishment", () => {
-    expect(establishmentStudy(["CDC", "A", "none"], "projet", false).study?.kind).toBe("eie_a");
-    expect(establishmentStudy(["A", "B"], "projet", false).study?.kind).toBe("eie_b");
-    expect(establishmentStudy(["CDC", "none"], "projet", false).study?.kind).toBe("cahier_des_charges");
+    expect(establishmentStudy(["CDC8", "A14", "none"], "projet", false).study?.kind).toBe("eie_a");
+    expect(establishmentStudy(["A14", "B19"], "projet", false).study?.kind).toBe("eie_b");
+    expect(establishmentStudy(["CDC8", "none"], "projet", false).study?.kind).toBe("cahier_des_charges");
     expect(establishmentStudy(["none"], "existant", false).study?.kind).toBe("demande_avis");
   });
 
-  it("gives the ANPE review time, longer near a protected area", () => {
-    expect(establishmentStudy(["A"], "projet", false).study?.delay).toBe("21 jours ouvrables");
-    expect(establishmentStudy(["A"], "projet", true).study?.delay).toMatch(/^3 mois/);
+  it("gives the ANPE review time of art. 9, longer near a protected area", () => {
+    expect(establishmentStudy(["A14"], "projet", false).study?.delay).toMatch(/^21 jours ouvrables/);
+    expect(establishmentStudy(["A14"], "projet", true).study?.delay).toMatch(/^3 mois ouvrables/);
+    expect(establishmentStudy(["B19"], "projet", false).study?.delay).toMatch(/^3 mois ouvrables/);
   });
 
-  it("waits until every activity's annex is known", () => {
-    const out = establishmentStudy(["A", null], "projet", false);
-    expect(out.study).toBeNull();
-    expect(out.unknown).toBe(1);
+  it("waits until every activity's entry is chosen, and ignores unknown ids", () => {
+    expect(establishmentStudy(["A14", undefined], "projet", false)).toMatchObject({ study: null, missing: 1 });
+    expect(establishmentStudy(["Z99"], "projet", false)).toMatchObject({ study: null, missing: 1 });
   });
+
+  it("keeps the chosen entry in the URL form", () => {
+    const list: Activity[] = [{ code: "1213", quantity: "5", unit: "t/j", eie: "CDC6" }];
+    expect(decodeActivities(encodeActivities(list))[0].eie).toBe("CDC6");
+  });
+});
+
+it("edii/eie.json matches the decree and edii/eie-links.json", () => {
+  const file = path.join(__dirname, "..", "edii", "eie.json");
+  const before = readFileSync(file, "utf8");
+  try {
+    execFileSync("pdftotext", ["-v"], { stdio: "pipe" });
+    execFileSync("python3", ["-I", path.join(__dirname, "..", "edii", "pipeline", "eie.py")], { stdio: "pipe" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // no python or no pdftotext (poppler-utils)
+    throw e;
+  }
+  expect(readFileSync(file, "utf8"), "edii/eie.json is stale: run `npm run edii:eie` and commit").toBe(before);
 });

@@ -106,11 +106,51 @@ classifier shows the text instead of guessing.
   * Example: acétylène 30 t (2502) and hydrogène 30 t (2509) are each 2ème catégorie. With the 1ère
     thresholds (50 t each), 30/50 + 30/50 = 1.2 > 1, so the establishment is classed 1ère catégorie.
 
+## Environmental study (ANPE)
+
+The page also says which study the ANPE expects, under décret n° 2005-1991 du 11 juillet 2005
+(`sources/2005-07-11-decret-2005-1991-eie.pdf`, a Word export, so its text is exact and needs no OCR).
+
+```bash
+npm run edii:eie     # decree → edii/eie.json  (needs pdftotext)
+```
+
+`pipeline/eie.py` splits the decree's three lists into 68 entries:
+
+* annexe 1, catégorie A: 24 entries, étude d'impact, ANPE avis within 21 working days (art. 9);
+* annexe 1, catégorie B: 26 entries, étude d'impact, ANPE avis within 3 months (art. 9);
+* annexe 2: 18 entries, cahier des charges (art. 3).
+
+These lists are separate from the EDII nomenclature: mostly sectors, some with their own
+thresholds (t/j, t/an, ha, lits, MW), and some projects outside it (roads, lotissements, hotels).
+`eie-links.json` suggests, for each entry, the rubriques it may cover. That is a reading of two
+texts, so the page lists the suggested entries first but **the user chooses** each activity's
+entry, or "none".
+
+`lib/edii/studies.ts` then decides:
+
+| Situation | Entry | Study |
+|---|---|---|
+| New project, or existing unit extended, transformed or changing its process (art. 12) | annexe 1 A | Étude d'impact, catégorie A (3 months instead of 21 days near a protected area, art. 9) |
+| same | annexe 1 B | Étude d'impact, catégorie B |
+| same | annexe 2 | Cahier des charges |
+| Unit already operating, regularising | annexe 1 or 2 | Étude de dépollution, on the ANPE's terms of reference |
+| Any | none | Demande d'avis |
+
+The establishment takes the most demanding study of its activities. The page lists the steps
+with their articles: who writes the study (art. 2, 6, 7), how many copies go where (art. 8), the
+ANPE's deadline and tacit agreement (art. 9), the avis of a protected area's manager (art. 10),
+and that no authorisation comes before (art. 5).
+
 ## Not done yet
 
 * **Reading of the addition rule**: the text does not say which threshold Qx is. The reading
   above (the category just above) is the only one under which the rule can ever leave a category
   unchanged; it should be confirmed.
+* **Étude de dépollution**: it is not in décret n° 2005-1991. Circulaire n° 27 du 7 novembre 2024
+  allowed it as a regularisation route until 31 December 2025; the page asks to check that it is
+  still in force. Whether an existing annexe 2 unit regularises with a dépollution study or with
+  its cahier des charges should be confirmed with the ANPE.
 * **Reading of 2724**: the 2010 text restates rubrique 2724 as a definition only, in its "complete"
   annex, and moves the thresholds to 2724 bis 1 and bis 2. The parser treats the restatement as a
   replacement. This reading should be confirmed (see `review.md`).

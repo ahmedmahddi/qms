@@ -23,6 +23,7 @@ import {
   type EstablishmentResult,
   fmtRatio,
 } from "@/lib/edii/establishment";
+import { eie, eieEntry, entriesFor, establishmentStudy, SITUATIONS, type Situation, type StudyKind } from "@/lib/edii/studies";
 
 const LABEL: Record<string, string> = { "1": "1ère catégorie", "2": "2ème catégorie", "3": "3ème catégorie", NC: "Non classé" };
 const SOURCE = Object.fromEntries(nomenclature.sources.map((s) => [s.id, s]));
@@ -47,6 +48,11 @@ function Edii() {
   const [section, setSection] = useState<string | null>(null);
   const [code, setCode] = useState(params.get("code"));
   const [activities, setActivities] = useState<Activity[]>(() => decodeActivities(params.get("e")));
+  const [situation, setSituation] = useState<Situation>(() => {
+    const s = params.get("s");
+    return s && s in SITUATIONS ? (s as Situation) : "projet";
+  });
+  const [sensitive, setSensitive] = useState(params.get("z") === "1");
   const selected = rubrique(code ?? "");
   const est = useMemo(() => classifyEstablishment(activities), [activities]);
 
@@ -56,9 +62,11 @@ function Edii() {
     const p = new URLSearchParams();
     if (code) p.set("code", code);
     if (activities.length) p.set("e", encodeActivities(activities));
+    if (activities.length && situation !== "projet") p.set("s", situation);
+    if (activities.length && sensitive) p.set("z", "1");
     if (query.trim()) p.set("q", query.trim());
     router.replace(`/edii${p.size ? `?${p}` : ""}`, { scroll: false });
-  }, [code, activities, query, router]);
+  }, [code, activities, situation, sensitive, query, router]);
 
   const results = useMemo(() => {
     if (query.trim()) return search(query, 60);
@@ -132,7 +140,17 @@ function Edii() {
 
         <main>
           {activities.length ? (
-            <EstablishmentCard est={est} update={update} remove={remove} clear={() => setActivities([])} open={open} />
+            <>
+              <EstablishmentCard est={est} update={update} remove={remove} clear={() => setActivities([])} open={open} />
+              <StudyCard
+                activities={activities}
+                situation={situation}
+                sensitive={sensitive}
+                setSituation={setSituation}
+                setSensitive={setSensitive}
+                update={update}
+              />
+            </>
           ) : null}
           {selected ? (
             <RubriqueView key={selected.code} rub={selected} count={count(selected.code)} onAdd={() => add(selected.code)} onOpen={open} />
@@ -341,6 +359,163 @@ function ActivityRow({
       </td>
     </tr>
   );
+}
+
+const STUDY_SHORT: Record<StudyKind, string> = {
+  eie_a: "EIE catégorie A",
+  eie_b: "EIE catégorie B",
+  cahier_des_charges: "Cahier des charges",
+  depollution: "Étude de dépollution",
+  demande_avis: "Demande d'avis",
+};
+
+function StudyCard({
+  activities,
+  situation,
+  sensitive,
+  setSituation,
+  setSensitive,
+  update,
+}: {
+  activities: Activity[];
+  situation: Situation;
+  sensitive: boolean;
+  setSituation: (s: Situation) => void;
+  setSensitive: (z: boolean) => void;
+  update: (i: number, patch: Partial<Activity>) => void;
+}) {
+  const result = establishmentStudy(
+    activities.map((a) => a.eie),
+    situation,
+    sensitive,
+  );
+  return (
+    <div className="card edii-study">
+      <div className="edii-head">
+        <h2>Étude environnementale (ANPE)</h2>
+        <span className="muted small">Décret n° 2005-1991 du 11 juillet 2005</span>
+      </div>
+      <div className="form">
+        <div className="field wide">
+          <label>Situation de l&apos;établissement</label>
+          <select value={situation} onChange={(e) => setSituation(e.target.value as Situation)}>
+            {Object.entries(SITUATIONS).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="field wide edii-check">
+          <span>
+            <input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} /> Le site peut affecter une zone
+            protégée ou sensible (forêts, paysages naturels ou historiques, parcs, espaces protégés, faune et flore)
+          </span>
+        </label>
+      </div>
+
+      <div className="table-wrap edii-eie-wrap">
+        <table className="grid edii-eie">
+          <thead>
+            <tr>
+              <th>Activité</th>
+              <th>Entrée du décret (annexe 1 ou 2)</th>
+              <th>Étude</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activities.map((a, i) => {
+              const rub = rubrique(a.code)!;
+              const { suggested, others } = entriesFor(a.code);
+              const kind = result.perActivity[i];
+              const entry = eieEntry(a.eie);
+              return (
+                <tr key={i}>
+                  <td>
+                    <span className="mono">{rub.code}</span> {rub.title}
+                  </td>
+                  <td>
+                    <select
+                      className="edii-case"
+                      value={a.eie && (a.eie === "none" || entry) ? a.eie : ""}
+                      onChange={(e) => update(i, { eie: e.target.value || undefined })}
+                      aria-label={`Entrée du décret pour ${rub.code}`}
+                    >
+                      <option value="">Choisir…</option>
+                      {suggested.length ? (
+                        <optgroup label="Suggérées pour cette rubrique">
+                          {suggested.map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {entryLabel(e.id, e.text)}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null}
+                      <optgroup label="Aucune entrée">
+                        <option value="none">L&apos;activité ne figure dans aucune annexe</option>
+                      </optgroup>
+                      {(["A", "B", "CDC"] as const).map((k) => (
+                        <optgroup key={k} label={eie.annexes[k]}>
+                          {others
+                            .filter((e) => e.annexe === k)
+                            .map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {entryLabel(e.id, e.text)}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    {entry ? <div className="muted small edii-why">{entry.text}</div> : null}
+                  </td>
+                  <td>{kind ? <span className={`badge edii-s-${kind}`}>{STUDY_SHORT[kind]}</span> : <span className="muted small">à choisir</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small">
+        Les suggestions rapprochent la rubrique des entrées du décret ; c&apos;est une lecture à confirmer, d&apos;où le choix laissé à
+        l&apos;utilisateur.
+      </p>
+
+      {result.study ? (
+        <div className="edii-study-result">
+          <div className="edii-verdict">
+            <span className={`badge edii-big edii-s-${result.study.kind}`}>{result.study.title}</span>
+            {result.study.delay ? <span>Délai de l&apos;ANPE : {result.study.delay}</span> : null}
+          </div>
+          {activities.length > 1 && new Set(result.perActivity).size > 1 ? (
+            <p className="small muted">L&apos;établissement retient l&apos;étude la plus exigeante de ses activités.</p>
+          ) : null}
+          <ol className="edii-steps small">
+            {result.study.steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          <p className="muted small">Base : {result.study.basis}.</p>
+          {result.study.kind === "depollution" ? (
+            <p className="edii-note small">
+              La circulaire n° 27 du 7 novembre 2024 ouvrait cette régularisation jusqu&apos;au 31 décembre 2025 : vérifier auprès de
+              l&apos;ANPE qu&apos;elle est toujours en vigueur.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="muted">
+          {result.missing === 1 ? "Choisir l'entrée du décret de l'activité restante" : `Choisir l'entrée du décret des ${result.missing} activités restantes`}{" "}
+          pour connaître l&apos;étude à fournir.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function entryLabel(id: string, text: string) {
+  const ref = id.startsWith("CDC") ? `Annexe 2, n° ${id.slice(3)}` : `Annexe 1 cat. ${id[0]}, n° ${id.slice(1)}`;
+  const short = text.length > 110 ? `${text.slice(0, 110)}…` : text;
+  return `${ref} · ${short}`;
 }
 
 function AdditionPanel({ a }: { a: AdditionResult }) {

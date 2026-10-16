@@ -217,8 +217,24 @@ button.link { background: none; border: none; color: inherit; padding: 0 0 0 4px
 .edii-c2 { background: var(--warn-bg); color: var(--warn); }
 .edii-c3 { background: var(--info-bg); color: var(--accent); }
 .edii-cNC { background: var(--ok-bg); color: var(--ok); }
+.edii-check span { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; }
+.edii-check input { margin-top: 3px; }
+.edii-eie-wrap { margin-top: 14px; }
+.edii-eie td { white-space: normal; max-width: none; vertical-align: top; }
+.edii-eie td:first-child { width: 30%; }
+.edii-study-result { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.edii-s-eie_b { background: var(--bad-bg); color: var(--bad); }
+.edii-s-eie_a { background: var(--warn-bg); color: var(--warn); }
+.edii-s-depollution { background: var(--warn-bg); color: var(--warn); }
+.edii-s-cahier_des_charges { background: var(--info-bg); color: var(--accent); }
+.edii-s-demande_avis { background: var(--ok-bg); color: var(--ok); }
+.edii select { max-width: 100%; min-width: 0; }
 @media (max-width: 800px) {
-  .edii-layout { grid-template-columns: 1fr; }
+  .edii-layout { grid-template-columns: minmax(0, 1fr); }
+  .edii-big { white-space: normal; }
+  .edii-eie thead { display: none; }
+  .edii-eie tr { display: block; border-bottom: 1px solid var(--border); padding: 6px 0; }
+  .edii-eie td { display: block; border: none; padding: 4px 10px; width: auto !important; }
   .edii-list { position: static; max-height: none; }
   .edii-verdict { flex-direction: column; align-items: flex-start; }
   .edii-acts thead { display: none; }
