@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { additionGroup, classify, type Input, rubrique, search, variants } from "@/lib/edii/classify";
 import { type Activity, classifyEstablishment, decodeActivities, encodeActivities } from "@/lib/edii/establishment";
+import { establishmentStudy, studyFor } from "@/lib/edii/studies";
 
 function classe(code: string, input: Input = {}) {
   const rub = rubrique(code);
@@ -207,4 +208,34 @@ it("edii/nomenclature.json matches the OCR output and corrections", () => {
     throw e;
   }
   expect(readFileSync(file, "utf8"), "edii/nomenclature.json is stale: run `npm run edii:parse` and commit").toBe(before);
+});
+
+describe("études ANPE (décret n° 2005-1991)", () => {
+  it("picks the study for one activity", () => {
+    expect(studyFor("A", "projet")).toBe("eie_a");
+    expect(studyFor("B", "projet")).toBe("eie_b");
+    expect(studyFor("CDC", "projet")).toBe("cahier_des_charges");
+    expect(studyFor("A", "existant")).toBe("depollution");
+    expect(studyFor("CDC", "existant")).toBe("depollution");
+    expect(studyFor("none", "projet")).toBe("demande_avis");
+    expect(studyFor("none", "existant")).toBe("demande_avis");
+  });
+
+  it("keeps the most demanding study for the establishment", () => {
+    expect(establishmentStudy(["CDC", "A", "none"], "projet", false).study?.kind).toBe("eie_a");
+    expect(establishmentStudy(["A", "B"], "projet", false).study?.kind).toBe("eie_b");
+    expect(establishmentStudy(["CDC", "none"], "projet", false).study?.kind).toBe("cahier_des_charges");
+    expect(establishmentStudy(["none"], "existant", false).study?.kind).toBe("demande_avis");
+  });
+
+  it("gives the ANPE review time, longer near a protected area", () => {
+    expect(establishmentStudy(["A"], "projet", false).study?.delay).toBe("21 jours ouvrables");
+    expect(establishmentStudy(["A"], "projet", true).study?.delay).toMatch(/^3 mois/);
+  });
+
+  it("waits until every activity's annex is known", () => {
+    const out = establishmentStudy(["A", null], "projet", false);
+    expect(out.study).toBeNull();
+    expect(out.unknown).toBe(1);
+  });
 });
