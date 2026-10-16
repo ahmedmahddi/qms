@@ -65,7 +65,6 @@ Sign in with one of the demo accounts listed on the login page:
 | `app/`, `components/`, `lib/client/` | The web app, generated from the same metadata. |
 | `tests/` | Vitest suite. It calls the API in-process against a real database. |
 | `scripts/` | `migrate`, `seed`, and `deploy-db` (run by `vercel-build`). |
-| `edii/`, `lib/edii/`, `app/edii/` | Classification of *établissements dangereux, insalubres ou incommodes* (1ère, 2ème, 3ème catégorie, non classé): the official texts, the OCR pipeline that turns them into `edii/nomenclature.json`, the classifier and its page at `/edii`. See `edii/README.md`. |
 
 ## How tenancy is enforced
 
